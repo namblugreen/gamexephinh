@@ -41,6 +41,22 @@ const Storage = {
     },
     getDailyStatus(d) { const raw = localStorage.getItem(KEYS.daily(d)); return raw ? JSON.parse(raw) : null; },
     saveDailyResult(d, score) { localStorage.setItem(KEYS.daily(d), JSON.stringify(score)); },
+    saveGame(data) {
+        const key = data.mode && data.mode.type === 'daily' ? 'bbp_savegame_daily' : 'bbp_savegame';
+        localStorage.setItem(key, JSON.stringify(data));
+    },
+    loadGame(type) {
+        const key = type === 'daily' ? 'bbp_savegame_daily' : 'bbp_savegame';
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+    },
+    clearSave(type) {
+        const key = type === 'daily' ? 'bbp_savegame_daily' : 'bbp_savegame';
+        localStorage.removeItem(key);
+    },
+    hasSave() {
+        return localStorage.getItem('bbp_savegame') !== null || localStorage.getItem('bbp_savegame_daily') !== null;
+    },
 };
 Game.Storage = Storage;
 
@@ -667,6 +683,7 @@ const menuBtns = [
     { label: 'BANG XEP HANG', mode: 'leaderboard', x:0, y:0, w:180, h:36 },
     { label: 'CAI DAT', mode: 'settings', x:0, y:0, w:180, h:36 },
 ];
+const continueBtnDef = { label: 'TIEP TUC', mode: 'continue', x:0, y:0, w:180, h:36 };
 
 const canvas = document.getElementById('gameCanvas');
 R.init(canvas);
@@ -727,6 +744,7 @@ Input.onPieceDrop = (index, row, col) => {
         }
         if (pieces.every(p => p === null)) spawnNewPieces();
         checkGameOver();
+        autoSave();
     } else {
         Audio.playInvalid();
         R.shake(2); // small shake on invalid
@@ -738,12 +756,21 @@ Input.onPieceCancel = () => {};
 Input.onClick = (x, y) => {
     Audio.resume();
     if (state === ST.MENU) {
-        for (const btn of menuBtns) {
+        const btns = Storage.hasSave() ? [continueBtnDef, ...menuBtns] : menuBtns;
+        for (const btn of btns) {
             if (x >= btn.x && x <= btn.x+btn.w && y >= btn.y && y <= btn.y+btn.h) {
                 Audio.playClick();
-                if (btn.mode === 'leaderboard') state = ST.LB;
-                else if (btn.mode === 'settings') state = ST.SET;
-                else startGame(btn.mode);
+                if (btn.mode === 'continue') {
+                    loadSavedGame();
+                } else if (btn.mode === 'leaderboard') {
+                    state = ST.LB;
+                } else if (btn.mode === 'settings') {
+                    state = ST.SET;
+                } else if (btn.mode === 'fullscreen') {
+                    // skip for now
+                } else {
+                    startGame(btn.mode);
+                }
                 return;
             }
         }
@@ -771,6 +798,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 function startGame(mType) {
+    Storage.clearSave(mType);
     board = Board.create(); scoreState = Score.create(); mode = Modes.create(mType);
     undosLeft = 3; undoSnapshot = null; comboText = ''; comboAlpha = 0;
     rng = mType === 'daily' ? Pieces.createSeededRng(mode.seed) : null;
@@ -778,7 +806,7 @@ function startGame(mType) {
     highScore = lb.length > 0 ? lb[0].score : 0;
     spawnNewPieces(); state = ST.PLAY; Audio.startMusic();
 }
-function spawnNewPieces() { pieces = rng ? Pieces.seededSpawnSet(rng) : Pieces.spawnSet(); }
+function spawnNewPieces() { pieces = rng ? Pieces.seededSpawnSet(rng) : Pieces.spawnSet(); autoSave(); }
 function performUndo() {
     if (undosLeft <= 0 || !undoSnapshot) return;
     board = undoSnapshot.board; pieces = undoSnapshot.pieces; scoreState = { ...undoSnapshot.scoreState };
@@ -787,8 +815,44 @@ function performUndo() {
 function checkGameOver() {
     const rem = pieces.filter(p => p !== null);
     if (rem.length > 0 && !rem.some(p => Board.canPlaceAny(board, p))) {
+        Storage.clearSave(mode.type);
         state = ST.OVER; Audio.stopMusic(); Audio.playGameOver();
     }
+}
+
+function autoSave() {
+    if (state !== ST.PLAY) return;
+    const saveData = {
+        board: Board.clone(board),
+        pieces: pieces.map(p => p ? { ...p, cells: p.cells.map(c => [...c]) } : null),
+        scoreState: { ...scoreState },
+        highScore: highScore,
+        mode: { ...mode },
+        undosLeft: undosLeft,
+        undoSnapshot: undoSnapshot ? {
+            board: Board.clone(undoSnapshot.board),
+            pieces: undoSnapshot.pieces.map(p => p ? { ...p, cells: p.cells.map(c => [...c]) } : null),
+            scoreState: { ...undoSnapshot.scoreState },
+        } : null,
+    };
+    Storage.saveGame(saveData);
+}
+
+function loadSavedGame() {
+    let save = Storage.loadGame('classic');
+    if (!save) save = Storage.loadGame('daily');
+    if (!save) return;
+    board = save.board;
+    pieces = save.pieces;
+    scoreState = save.scoreState;
+    highScore = save.highScore;
+    mode = save.mode;
+    undosLeft = save.undosLeft;
+    undoSnapshot = save.undoSnapshot;
+    rng = null;
+    comboText = ''; comboAlpha = 0; comboScale = 1;
+    state = ST.PLAY;
+    Audio.startMusic();
 }
 
 // === DRAW SCREENS ===
@@ -803,16 +867,29 @@ function drawMenu() {
     ctx.fillText('PIXEL', R.cw/2, 105);
 
     ctx.shadowBlur = 0;
-    const startY = 150, gap = 50;
-    for (let i = 0; i < menuBtns.length; i++) {
-        const btn = menuBtns[i];
+    const hasSave = Storage.hasSave();
+    const btns = hasSave ? [continueBtnDef, ...menuBtns] : menuBtns;
+    const startY = hasSave ? 130 : 150;
+    const gap = hasSave ? 42 : 50;
+    for (let i = 0; i < btns.length; i++) {
+        const btn = btns[i];
         btn.x = (R.cw - btn.w) / 2; btn.y = startY + i * gap;
-        // Button with subtle gradient feel
-        ctx.fillStyle = '#2a2a4a'; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
-        ctx.fillStyle = '#3a3a5a'; ctx.fillRect(btn.x, btn.y, btn.w, 2); // top highlight
-        ctx.strokeStyle = '#5a5a7a'; ctx.lineWidth = 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
-        ctx.fillStyle = '#fff'; ctx.font = '8px "Press Start 2P"';
-        ctx.fillText(btn.label, R.cw/2, btn.y+22);
+        if (btn.mode === 'continue') {
+            // Green styling for continue button
+            ctx.shadowColor = '#44bb44'; ctx.shadowBlur = 8;
+            ctx.fillStyle = '#1a3a1a'; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.strokeStyle = '#44bb44'; ctx.lineWidth = 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#44bb44'; ctx.font = '8px "Press Start 2P"';
+            ctx.fillText(btn.label, R.cw/2, btn.y+22);
+        } else {
+            // Button with subtle gradient feel
+            ctx.fillStyle = '#2a2a4a'; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.fillStyle = '#3a3a5a'; ctx.fillRect(btn.x, btn.y, btn.w, 2); // top highlight
+            ctx.strokeStyle = '#5a5a7a'; ctx.lineWidth = 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.fillStyle = '#fff'; ctx.font = '8px "Press Start 2P"';
+            ctx.fillText(btn.label, R.cw/2, btn.y+22);
+        }
     }
     ctx.textAlign = 'left';
 }
@@ -917,5 +994,8 @@ Game.ST = ST;
 Game.startGame = startGame;
 Game.menuBtns = menuBtns;
 Game.Input = Input;
+Game.autoSave = autoSave;
+Game.loadSavedGame = loadSavedGame;
+Game.continueBtnDef = continueBtnDef;
 
 })();
