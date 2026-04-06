@@ -1,7 +1,7 @@
 import { Board } from './board.js';
 import { Pieces } from './pieces.js';
 import { Score } from './score.js';
-import { Renderer } from './renderer.js';
+import { Renderer, spawnParticles, updateAndDrawParticles } from './renderer.js';
 import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { Modes } from './modes.js';
@@ -66,11 +66,16 @@ Input.onPieceDrop = (index, row, col) => {
         Score.addPlacement(scoreState, piece.cells.length);
         Audio.playPlace();
 
+        const placedColor = piece.color;
         pieces[index] = null;
 
         // Check line clears
         const cleared = Board.checkAndClearLines(board);
         if (cleared.totalLines > 0) {
+            // Spawn particles for cleared cells
+            for (const cell of cleared.cellsCleared) {
+                spawnParticles([cell], placedColor);
+            }
             const result = Score.addLineClear(scoreState, cleared.totalLines);
             Audio.playClear(cleared.totalLines);
             Modes.addTimeBonus(mode, cleared.totalLines);
@@ -365,6 +370,7 @@ function gameLoop(timestamp) {
             Renderer.clear();
             Renderer.drawGrid(board);
             Renderer.drawSpawnPieces(pieces, Input.dragging ? Input.dragging.pieceIndex : -1);
+            updateAndDrawParticles(Renderer.ctx, dt);
             Renderer.drawScorePanel(scoreState, highScore, undosLeft, mode.type);
 
             if (mode.hasTimer) Renderer.drawTimer(mode.timeLeft);

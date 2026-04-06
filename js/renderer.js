@@ -289,3 +289,40 @@ export const Renderer = {
 
     CELL_SIZE,
 };
+
+const particles = [];
+
+export function spawnParticles(cells, colorId) {
+    const pal = COLOR_PALETTE[colorId];
+    if (!pal) return;
+    for (const [r, c] of cells) {
+        for (let i = 0; i < 4; i++) {
+            particles.push({
+                x: Renderer.boardX + c * CELL_SIZE + CELL_SIZE / 2,
+                y: Renderer.boardY + r * CELL_SIZE + CELL_SIZE / 2,
+                vx: (Math.random() - 0.5) * 120,
+                vy: (Math.random() - 0.5) * 120,
+                size: 3 + Math.random() * 3,
+                color: pal.base,
+                life: 1,
+            });
+        }
+    }
+}
+
+export function updateAndDrawParticles(ctx, dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.life -= dt * 2;
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+            continue;
+        }
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+}
