@@ -248,6 +248,12 @@ const Audio = {
 };
 Game.Audio = Audio;
 
+function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
 // === RENDERER ===
 const CELL = 32, GSIZ = 8, BPAD = 20;
 const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -685,6 +691,11 @@ const settingsItems = [
 ];
 let board = null, pieces = [], scoreState = null, highScore = 0, mode = null, rng = null;
 let undosLeft = 3, undoSnapshot = null, comboText = '', comboAlpha = 0, comboScale = 1, lastTime = 0, playerName = '';
+let menuHover = -1;
+let transitionAlpha = 0;
+let prevState = null;
+let spawnAnim = 0;
+let gameOverAnim = 0;
 let powerups = [];
 let activePowerup = null;
 let powerupScore = 0;
@@ -882,7 +893,7 @@ function startGame(mType) {
     highScore = lb.length > 0 ? lb[0].score : 0;
     spawnNewPieces(); state = ST.PLAY; Audio.startMusic();
 }
-function spawnNewPieces() { pieces = rng ? Pieces.seededSpawnSet(rng) : Pieces.spawnSet(); autoSave(); }
+function spawnNewPieces() { pieces = rng ? Pieces.seededSpawnSet(rng) : Pieces.spawnSet(); spawnAnim = 0; autoSave(); }
 function performUndo() {
     if (undosLeft <= 0 || !undoSnapshot) return;
     board = undoSnapshot.board; pieces = undoSnapshot.pieces; scoreState = { ...undoSnapshot.scoreState };
@@ -955,17 +966,19 @@ function drawMenu() {
     for (let i = 0; i < btns.length; i++) {
         const btn = btns[i];
         btn.x = (R.cw - btn.w) / 2; btn.y = startY + i * gap;
+        const isHover = Input.mouseX >= btn.x && Input.mouseX <= btn.x + btn.w &&
+                        Input.mouseY >= btn.y && Input.mouseY <= btn.y + btn.h;
         if (btn.mode === 'continue') {
             // Green styling for continue button
             ctx.shadowColor = '#44bb44'; ctx.shadowBlur = 8;
-            ctx.fillStyle = '#1a3a1a'; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.fillStyle = isHover ? '#2a4a2a' : '#1a3a1a'; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
             ctx.strokeStyle = '#44bb44'; ctx.lineWidth = 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
             ctx.shadowBlur = 0;
             ctx.fillStyle = '#44bb44'; ctx.font = '8px "Press Start 2P"';
             ctx.fillText(btn.label, R.cw/2, btn.y+22);
         } else {
             // Button with subtle gradient feel
-            ctx.fillStyle = '#2a2a4a'; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.fillStyle = isHover ? '#3a3a6a' : '#2a2a4a'; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
             ctx.fillStyle = '#3a3a5a'; ctx.fillRect(btn.x, btn.y, btn.w, 2); // top highlight
             ctx.strokeStyle = '#5a5a7a'; ctx.lineWidth = 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
             ctx.fillStyle = '#fff'; ctx.font = '8px "Press Start 2P"';
@@ -1074,12 +1087,42 @@ function gameLoop(ts) {
 
     if (comboAlpha > 0) { comboAlpha -= dt * 1.2; comboScale = 1 + comboAlpha * 0.8; }
 
+    if (state !== prevState) {
+        transitionAlpha = 1;
+        prevState = state;
+        if (state === ST.OVER) gameOverAnim = 0;
+    }
+    if (transitionAlpha > 0) transitionAlpha -= dt * 3;
+
     switch (state) {
         case ST.MENU: drawMenu(); break;
         case ST.PLAY:
             if (mode.hasTimer) { Modes.tick(mode, dt); if (Modes.isTimeUp(mode)) { state = ST.OVER; Audio.stopMusic(); Audio.playGameOver(); } }
             R.clear(); R.drawGrid(board);
-            R.drawSpawnPieces(pieces, Input.dragging ? Input.dragging.pieceIndex : -1);
+            const fillRatio = Board.getOccupiedCount(board) / 64;
+            if (fillRatio > 0.7) {
+                const warn = Math.sin(Date.now() / 250) > 0;
+                if (warn) {
+                    const ctx = R.ctx;
+                    ctx.strokeStyle = '#ff444488';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(R.bx + R.shakeX, R.by + R.shakeY, GSIZ * CELL, GSIZ * CELL);
+                }
+            }
+            spawnAnim = Math.min(1, spawnAnim + dt * 4);
+            if (spawnAnim < 1) {
+                const ctx = R.ctx;
+                ctx.save();
+                const scale = easeOutBack(spawnAnim);
+                const cx = R.bx + 135, cy = R.sy + 40;
+                ctx.translate(cx, cy);
+                ctx.scale(scale, scale);
+                ctx.translate(-cx, -cy);
+                R.drawSpawnPieces(pieces, Input.dragging ? Input.dragging.pieceIndex : -1);
+                ctx.restore();
+            } else {
+                R.drawSpawnPieces(pieces, Input.dragging ? Input.dragging.pieceIndex : -1);
+            }
             updateEffects(R.ctx, dt);
             R.drawScorePanel(scoreState, highScore, undosLeft, mode.type);
             if (mode.hasTimer) R.drawTimer(mode.timeLeft);
@@ -1094,10 +1137,43 @@ function gameLoop(ts) {
             }
             break;
         case ST.PAUSE: R.clear(); R.drawGrid(Board.create()); R.drawPause(); break;
-        case ST.OVER: R.clear(); R.drawGrid(board); R.drawGameOver(scoreState.score); break;
+        case ST.OVER:
+            R.clear();
+            gameOverAnim = Math.min(1, gameOverAnim + dt * 1.5);
+            const goCtx = R.ctx;
+            const goBx = R.bx + R.shakeX, goBy = R.by + R.shakeY;
+            const goTheme = Game.getTheme ? Game.getTheme() : null;
+            goCtx.fillStyle = goTheme ? goTheme.gridBg : '#2a2a4a';
+            goCtx.fillRect(goBx, goBy, GSIZ * CELL, GSIZ * CELL);
+            for (let r = 0; r < 8; r++) {
+                const rowProgress = Math.max(0, Math.min(1, gameOverAnim * 10 - r * 0.8));
+                for (let c = 0; c < 8; c++) {
+                    if (board[r][c] !== 0) {
+                        if (rowProgress >= 1) {
+                            goCtx.fillStyle = '#555555';
+                            goCtx.fillRect(goBx + c * CELL + 1, goBy + r * CELL + 1, CELL - 2, CELL - 2);
+                        } else {
+                            R.drawCell(goBx + c * CELL, goBy + r * CELL, board[r][c]);
+                        }
+                    }
+                }
+            }
+            if (gameOverAnim > 0.6) {
+                const textAlpha = Math.min(1, (gameOverAnim - 0.6) * 2.5);
+                goCtx.globalAlpha = textAlpha;
+                R.drawGameOver(scoreState.score);
+                goCtx.globalAlpha = 1;
+            }
+            break;
         case ST.LB: drawLB(); break;
         case ST.SET: drawSettings(); break;
         case ST.NAME: drawNameInput(); break;
+    }
+    if (transitionAlpha > 0) {
+        R.ctx.fillStyle = '#000000';
+        R.ctx.globalAlpha = Math.max(0, transitionAlpha);
+        R.ctx.fillRect(0, 0, R.cw, R.ch);
+        R.ctx.globalAlpha = 1;
     }
     requestAnimationFrame(gameLoop);
 }
