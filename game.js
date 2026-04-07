@@ -250,6 +250,7 @@ Game.Audio = Audio;
 
 // === RENDERER ===
 const CELL = 32, GSIZ = 8, BPAD = 20;
+const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const CPAL = {
     1: { light: '#ff6b6b', base: '#ee4444', dark: '#bb2222' },
     2: { light: '#ffa94d', base: '#ff8822', dark: '#cc6600' },
@@ -349,7 +350,8 @@ const R = {
     },
     drawDragging(piece, mx, my) {
         if (!piece) return;
-        for (const [r, c] of piece.cells) this.drawCell(mx+c*CELL-CELL/2, my+r*CELL-CELL, piece.color, true);
+        const yOff = isMobile ? -CELL * 2 : -CELL;
+        for (const [r, c] of piece.cells) this.drawCell(mx+c*CELL-CELL/2, my+r*CELL+yOff, piece.color, true);
     },
     drawScorePanel(sc, hi, undo, mode) {
         const ctx = this.ctx, px = this.bx + GSIZ*CELL + 20, py = this.by;
@@ -415,10 +417,8 @@ const R = {
     },
     // Convert drag mouse position to grid position (accounting for visual offset)
     dragToGrid(mx, my) {
-        // Piece is drawn at mouseX - CELL/2, mouseY - CELL (offset up)
-        // So grid position should be based on where piece [0,0] center appears
         const adjX = mx;
-        const adjY = my - CELL / 2; // piece drawn 1 cell above mouse, center is half cell up
+        const adjY = isMobile ? my - CELL * 1.5 : my - CELL / 2;
         return this.screenToGrid(adjX, adjY);
     },
     getSpawnSlot(x, y) {
@@ -682,6 +682,7 @@ const menuBtns = [
     { label: 'HANG NGAY', mode: 'daily', x:0, y:0, w:180, h:36 },
     { label: 'BANG XEP HANG', mode: 'leaderboard', x:0, y:0, w:180, h:36 },
     { label: 'CAI DAT', mode: 'settings', x:0, y:0, w:180, h:36 },
+    { label: 'TOAN MAN HINH', mode: 'fullscreen', x:0, y:0, w:180, h:36 },
 ];
 const continueBtnDef = { label: 'TIEP TUC', mode: 'continue', x:0, y:0, w:180, h:36 };
 
@@ -767,7 +768,11 @@ Input.onClick = (x, y) => {
                 } else if (btn.mode === 'settings') {
                     state = ST.SET;
                 } else if (btn.mode === 'fullscreen') {
-                    // skip for now
+                    if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                    } else {
+                        document.documentElement.requestFullscreen().catch(() => {});
+                    }
                 } else {
                     startGame(btn.mode);
                 }
