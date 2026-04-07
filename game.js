@@ -68,19 +68,22 @@ const OnlineLB = {
     async fetch() {
         try {
             const res = await fetch('https://api.jsonbin.io/v3/b/' + JSONBIN_ID + '/latest', {
-                headers: { 'X-Master-Key': JSONBIN_KEY }
+                headers: {
+                    'X-Master-Key': JSONBIN_KEY,
+                    'X-Bin-Meta': 'false',
+                }
             });
-            if (!res.ok) return null;
+            if (!res.ok) { console.log('OnlineLB fetch fail:', res.status); return null; }
             const data = await res.json();
-            onlineLeaderboard = data.record || { classic: [], timeattack: [], daily: [] };
+            onlineLeaderboard = data || { classic: [], timeattack: [], daily: [] };
             return onlineLeaderboard;
-        } catch (e) { return null; }
+        } catch (e) { console.log('OnlineLB fetch error:', e); return null; }
     },
     async addScore(mode, name, score) {
         try {
-            let lb = onlineLeaderboard;
-            if (!lb) lb = await this.fetch();
-            if (!lb) lb = { classic: [], timeattack: [], daily: [] };
+            // Luôn fetch mới nhất trước để tránh ghi đè điểm người khác
+            const freshLb = await this.fetch();
+            const lb = freshLb || { classic: [], timeattack: [], daily: [] };
             if (!lb[mode]) lb[mode] = [];
             lb[mode].push({ name, score, date: new Date().toISOString() });
             lb[mode].sort((a, b) => b.score - a.score);
@@ -94,8 +97,9 @@ const OnlineLB = {
                 body: JSON.stringify(lb),
             });
             if (res.ok) onlineLeaderboard = lb;
+            else console.log('OnlineLB save fail:', res.status);
             return res.ok;
-        } catch (e) { return false; }
+        } catch (e) { console.log('OnlineLB save error:', e); return false; }
     },
     getCache() { return onlineLeaderboard; },
 };
