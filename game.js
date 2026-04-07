@@ -14,7 +14,7 @@ const KEYS = {
     leaderboard: (mode) => `bbp_leaderboard_${mode}`,
     daily: (date) => `bbp_daily_${date}`,
 };
-const DEFAULT_SETTINGS = { sfxEnabled: true, musicEnabled: true, sfxVolume: 0.7, musicVolume: 0.5 };
+const DEFAULT_SETTINGS = { sfxEnabled: true, musicEnabled: true, sfxVolume: 0.7, musicVolume: 0.5, theme: 'default' };
 
 const Storage = {
     getSettings() {
@@ -673,6 +673,16 @@ const Input = {
 const ST = { MENU:'menu', PLAY:'playing', PAUSE:'paused', OVER:'gameover', LB:'leaderboard', SET:'settings', NAME:'nameinput' };
 
 let state = ST.MENU;
+let settingsHover = -1;
+let deleteConfirm = false;
+const settingsItems = [
+    { key: 'sfxEnabled', label: 'AM THANH', type: 'toggle' },
+    { key: 'musicEnabled', label: 'NHAC', type: 'toggle' },
+    { key: 'sfxVolume', label: 'AM LUONG', type: 'range' },
+    { key: 'musicVolume', label: 'NHAC LUONG', type: 'range' },
+    { key: 'theme', label: 'CHU DE', type: 'cycle' },
+    { key: 'delete', label: 'XOA DU LIEU', type: 'confirm' },
+];
 let board = null, pieces = [], scoreState = null, highScore = 0, mode = null, rng = null;
 let undosLeft = 3, undoSnapshot = null, comboText = '', comboAlpha = 0, comboScale = 1, lastTime = 0, playerName = '';
 
@@ -783,7 +793,53 @@ Input.onClick = (x, y) => {
         Audio.playClick();
         if (Storage.isTopScore(mode.type, scoreState.score)) { playerName = ''; state = ST.NAME; }
         else state = ST.MENU;
-    } else if (state === ST.LB || state === ST.SET) { Audio.playClick(); state = ST.MENU; }
+    } else if (state === ST.LB) {
+        Audio.playClick(); state = ST.MENU;
+    } else if (state === ST.SET) {
+        let clickedItem = false;
+        const s = Storage.getSettings();
+        for (let i = 0; i < settingsItems.length; i++) {
+            const item = settingsItems[i];
+            if (x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h) {
+                Audio.playClick();
+                clickedItem = true;
+                if (item.type === 'toggle') {
+                    s[item.key] = !s[item.key];
+                    Storage.saveSettings(s);
+                    Audio.init(s);
+                    if (item.key === 'musicEnabled' && !s.musicEnabled) Audio.stopMusic();
+                } else if (item.type === 'range') {
+                    const midX = item.x + item.w / 2;
+                    if (x < midX) {
+                        s[item.key] = Math.max(0, Math.round((s[item.key] - 0.1) * 10) / 10);
+                    } else {
+                        s[item.key] = Math.min(1, Math.round((s[item.key] + 0.1) * 10) / 10);
+                    }
+                    Storage.saveSettings(s);
+                    if (masterSfxGain) masterSfxGain.gain.value = s.sfxVolume;
+                    if (masterMusicGain) masterMusicGain.gain.value = s.musicVolume;
+                } else if (item.type === 'cycle') {
+                    const themes = ['default', 'retro', 'sunset', 'galaxy'];
+                    const ci = themes.indexOf(s.theme || 'default');
+                    s.theme = themes[(ci + 1) % themes.length];
+                    Storage.saveSettings(s);
+                } else if (item.type === 'confirm') {
+                    if (deleteConfirm) {
+                        localStorage.clear();
+                        deleteConfirm = false;
+                    } else {
+                        deleteConfirm = true;
+                    }
+                }
+                break;
+            }
+        }
+        if (!clickedItem) {
+            Audio.playClick();
+            deleteConfirm = false;
+            state = ST.MENU;
+        }
+    }
 };
 
 document.addEventListener('keydown', (e) => {
@@ -920,13 +976,57 @@ function drawLB() {
 function drawSettings() {
     const ctx = R.ctx; R.clear();
     ctx.fillStyle = '#ffcc00'; ctx.font = '12px "Press Start 2P"'; ctx.textAlign = 'center';
-    ctx.fillText('CAI DAT', R.cw/2, 60);
-    const s = Storage.getSettings(); ctx.fillStyle = '#fff'; ctx.font = '8px "Press Start 2P"';
-    ctx.fillText('AM THANH: '+(s.sfxEnabled?'BAT':'TAT'), R.cw/2, 110);
-    ctx.fillText('NHAC: '+(s.musicEnabled?'BAT':'TAT'), R.cw/2, 140);
-    ctx.fillText('AM LUONG: '+Math.round(s.sfxVolume*100)+'%', R.cw/2, 170);
-    ctx.fillText('NHAC LUONG: '+Math.round(s.musicVolume*100)+'%', R.cw/2, 200);
-    ctx.fillStyle = '#aaa'; ctx.font = '7px "Press Start 2P"'; ctx.fillText('Nhan de quay lai', R.cw/2, 260); ctx.textAlign = 'left';
+    ctx.fillText('CAI DAT', R.cw/2, 50);
+
+    const s = Storage.getSettings();
+    const startY = 80, rowH = 35, rowW = 240;
+    const rx = (R.cw - rowW) / 2;
+
+    settingsHover = -1;
+    const mx = Input.mouseX, my = Input.mouseY;
+
+    for (let i = 0; i < settingsItems.length; i++) {
+        const item = settingsItems[i];
+        const ry = startY + i * rowH;
+        item.x = rx; item.y = ry; item.w = rowW; item.h = rowH - 5;
+
+        if (mx >= rx && mx <= rx + rowW && my >= ry && my <= ry + rowH - 5) settingsHover = i;
+
+        ctx.fillStyle = settingsHover === i ? '#3a3a6a' : '#2a2a4a';
+        ctx.fillRect(rx, ry, rowW, rowH - 5);
+        ctx.strokeStyle = '#5a5a7a'; ctx.lineWidth = 1;
+        ctx.strokeRect(rx, ry, rowW, rowH - 5);
+
+        let valueText = '';
+        let valueColor = '#fff';
+        if (item.type === 'toggle') {
+            valueText = s[item.key] ? 'BAT' : 'TAT';
+            valueColor = s[item.key] ? '#44bb44' : '#ff4444';
+        } else if (item.type === 'range') {
+            valueText = '< ' + Math.round(s[item.key] * 100) + '% >';
+            valueColor = '#74c0fc';
+        } else if (item.type === 'cycle') {
+            const themeNames = { default: 'MAC DINH', retro: 'RETRO XANH', sunset: 'HOANG HON', galaxy: 'GALAXY' };
+            valueText = themeNames[s.theme || 'default'] || 'MAC DINH';
+            valueColor = '#b197fc';
+        } else if (item.type === 'confirm') {
+            valueText = deleteConfirm ? 'CHAC CHUA?' : 'NHAN DE XOA';
+            valueColor = deleteConfirm ? '#ff4444' : '#aaa';
+        }
+
+        ctx.textAlign = 'left'; ctx.font = '7px "Press Start 2P"';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(item.label, rx + 8, ry + 18);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = valueColor;
+        ctx.fillText(valueText, rx + rowW - 8, ry + 18);
+    }
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#aaa'; ctx.font = '7px "Press Start 2P"';
+    ctx.fillText('Nhan de quay lai', R.cw/2, startY + settingsItems.length * rowH + 20);
+    ctx.textAlign = 'left';
 }
 
 function drawNameInput() {
