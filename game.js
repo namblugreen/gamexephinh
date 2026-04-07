@@ -765,6 +765,10 @@ R.init(canvas);
 Audio.init(Storage.getSettings());
 Input.init(canvas, R);
 
+// Preload Arsenal logo
+Game._arsenalImg = new Image();
+Game._arsenalImg.src = 'arsenal.png';
+
 Input.onPiecePickup = (i) => {
     if (state !== ST.PLAY || !pieces[i]) return null;
     Audio.resume(); return pieces[i];
@@ -1220,18 +1224,57 @@ function gameLoop(ts) {
             const goTheme = Game.getTheme ? Game.getTheme() : null;
             goCtx.fillStyle = goTheme ? goTheme.gridBg : '#2a2a4a';
             goCtx.fillRect(goBx, goBy, GSIZ * CELL, GSIZ * CELL);
+            // Phase 1: cascade board to gray
             for (let r = 0; r < 8; r++) {
                 const rowProgress = Math.max(0, Math.min(1, gameOverAnim * 10 - r * 0.8));
                 for (let c = 0; c < 8; c++) {
                     if (board[r][c] !== 0) {
                         if (rowProgress >= 1) {
-                            goCtx.fillStyle = '#555555';
+                            goCtx.fillStyle = '#333344';
                             goCtx.fillRect(goBx + c * CELL + 1, goBy + r * CELL + 1, CELL - 2, CELL - 2);
                         } else {
                             R.drawCell(goBx + c * CELL, goBy + r * CELL, board[r][c]);
                         }
                     }
                 }
+            }
+            // Phase 2: draw Arsenal logo on grid after cascade
+            if (gameOverAnim > 0.5) {
+                const logoAlpha = Math.min(1, (gameOverAnim - 0.5) * 3);
+                goCtx.globalAlpha = logoAlpha;
+                const gridSize = GSIZ * CELL;
+                if (Game._arsenalImg && Game._arsenalImg.naturalWidth > 0) {
+                    // Real image loaded
+                    const pad = CELL * 0.3;
+                    goCtx.drawImage(Game._arsenalImg, goBx + pad, goBy + pad, gridSize - pad * 2, gridSize - pad * 2);
+                } else {
+                    // Fallback pixel art cannon: 1=red, 2=gold
+                    const logo = [
+                        [0,0,0,1,1,1,1,0],
+                        [0,0,1,1,2,2,2,2],
+                        [0,1,1,1,1,1,1,0],
+                        [0,1,1,1,1,1,0,0],
+                        [1,1,1,1,1,1,0,0],
+                        [1,1,2,2,1,1,0,0],
+                        [1,2,1,1,2,1,0,0],
+                        [0,1,2,2,1,0,0,0],
+                    ];
+                    const lc = { 1: '#db0007', 2: '#eec900' };
+                    for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+                        if (logo[r][c] !== 0) {
+                            const cx = goBx + c * CELL, cy = goBy + r * CELL;
+                            goCtx.fillStyle = lc[logo[r][c]];
+                            goCtx.fillRect(cx + 1, cy + 1, CELL - 2, CELL - 2);
+                            goCtx.fillStyle = 'rgba(255,255,255,0.25)';
+                            goCtx.fillRect(cx + 1, cy + 1, CELL - 2, 3);
+                            goCtx.fillRect(cx + 1, cy + 1, 3, CELL - 2);
+                            goCtx.fillStyle = 'rgba(0,0,0,0.25)';
+                            goCtx.fillRect(cx + 1, cy + CELL - 4, CELL - 2, 3);
+                            goCtx.fillRect(cx + CELL - 4, cy + 1, 3, CELL - 2);
+                        }
+                    }
+                }
+                goCtx.globalAlpha = 1;
             }
             if (gameOverAnim > 0.6) {
                 const textAlpha = Math.min(1, (gameOverAnim - 0.6) * 2.5);
