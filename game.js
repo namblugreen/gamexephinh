@@ -685,6 +685,10 @@ const settingsItems = [
 ];
 let board = null, pieces = [], scoreState = null, highScore = 0, mode = null, rng = null;
 let undosLeft = 3, undoSnapshot = null, comboText = '', comboAlpha = 0, comboScale = 1, lastTime = 0, playerName = '';
+let powerups = [];
+let activePowerup = null;
+let powerupScore = 0;
+const POWERUP_COST = 300;
 
 const menuBtns = [
     { label: 'CO DIEN', mode: 'classic', x:0, y:0, w:180, h:36 },
@@ -719,6 +723,16 @@ Input.onPieceDrop = (index, row, col) => {
         // Place effect: flash + score popup
         spawnPlaceEffect(piece.cells.map(([dr,dc]) => [row+dr, col+dc]), piece.color);
         spawnScorePopup(pts, row, col);
+
+        powerupScore += pts;
+        while (powerupScore >= POWERUP_COST && powerups.length < 3) {
+            const types = ['bom', 'doimau', 'xoay', 'phahang', 'hoandoi', 'ghost'];
+            const newPU = types[Math.floor(Math.random() * types.length)];
+            powerups.push({ type: newPU });
+            powerupScore -= POWERUP_COST;
+            spawnFloatText('POWER-UP!', R.bx + (GSIZ*CELL)/2, R.by - 20, '#b197fc');
+            Audio.playCombo(2);
+        }
 
         const placedColor = piece.color;
         pieces[index] = null;
@@ -862,6 +876,7 @@ function startGame(mType) {
     Storage.clearSave(mType);
     board = Board.create(); scoreState = Score.create(); mode = Modes.create(mType);
     undosLeft = 3; undoSnapshot = null; comboText = ''; comboAlpha = 0;
+    powerups = []; activePowerup = null; powerupScore = 0;
     rng = mType === 'daily' ? Pieces.createSeededRng(mode.seed) : null;
     const lb = Storage.getLeaderboard(mType);
     highScore = lb.length > 0 ? lb[0].score : 0;
@@ -895,6 +910,8 @@ function autoSave() {
             pieces: undoSnapshot.pieces.map(p => p ? { ...p, cells: p.cells.map(c => [...c]) } : null),
             scoreState: { ...undoSnapshot.scoreState },
         } : null,
+        powerups: [...powerups],
+        powerupScore: powerupScore,
     };
     Storage.saveGame(saveData);
 }
@@ -911,6 +928,9 @@ function loadSavedGame() {
     undosLeft = save.undosLeft;
     undoSnapshot = save.undoSnapshot;
     rng = null;
+    powerups = save.powerups || [];
+    activePowerup = null;
+    powerupScore = save.powerupScore || 0;
     comboText = ''; comboAlpha = 0; comboScale = 1;
     state = ST.PLAY;
     Audio.startMusic();
@@ -1050,6 +1070,7 @@ function gameLoop(ts) {
     lastTime = ts;
 
     R.updateShake(dt);
+    if (Game.getTheme) document.body.style.background = Game.getTheme().bgColor;
 
     if (comboAlpha > 0) { comboAlpha -= dt * 1.2; comboScale = 1 + comboAlpha * 0.8; }
 
@@ -1102,5 +1123,9 @@ Game.Input = Input;
 Game.autoSave = autoSave;
 Game.loadSavedGame = loadSavedGame;
 Game.continueBtnDef = continueBtnDef;
+Game.getPowerups = () => ({ powerups, activePowerup, powerupScore });
+Game.setPowerups = (p) => { powerups = p.powerups; activePowerup = p.activePowerup; powerupScore = p.powerupScore; };
+Game._ghostActive = false;
+Game._puSlots = [];
 
 })();
