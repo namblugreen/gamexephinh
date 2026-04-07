@@ -58,7 +58,50 @@ const Storage = {
         return localStorage.getItem('bbp_savegame') !== null || localStorage.getItem('bbp_savegame_daily') !== null;
     },
 };
+
+// === ONLINE LEADERBOARD ===
+const JSONBIN_ID = '69d486bdaaba882197d01cc1';
+const JSONBIN_KEY = '$2a$10$I45bsPxNB8Q7dzUBNrqayOK5JkDaK31YuB4.7wiYedrefWUA/tDs6';
+let onlineLeaderboard = null; // cache
+
+const OnlineLB = {
+    async fetch() {
+        try {
+            const res = await fetch('https://api.jsonbin.io/v3/b/' + JSONBIN_ID + '/latest', {
+                headers: { 'X-Master-Key': JSONBIN_KEY }
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            onlineLeaderboard = data.record || { classic: [], timeattack: [], daily: [] };
+            return onlineLeaderboard;
+        } catch (e) { return null; }
+    },
+    async addScore(mode, name, score) {
+        try {
+            let lb = onlineLeaderboard;
+            if (!lb) lb = await this.fetch();
+            if (!lb) lb = { classic: [], timeattack: [], daily: [] };
+            if (!lb[mode]) lb[mode] = [];
+            lb[mode].push({ name, score, date: new Date().toISOString() });
+            lb[mode].sort((a, b) => b.score - a.score);
+            lb[mode] = lb[mode].slice(0, 20);
+            const res = await fetch('https://api.jsonbin.io/v3/b/' + JSONBIN_ID, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Master-Key': JSONBIN_KEY,
+                },
+                body: JSON.stringify(lb),
+            });
+            if (res.ok) onlineLeaderboard = lb;
+            return res.ok;
+        } catch (e) { return false; }
+    },
+    getCache() { return onlineLeaderboard; },
+};
+
 Game.Storage = Storage;
+Game.OnlineLB = OnlineLB;
 
 // === BOARD ===
 const Board = {
@@ -819,7 +862,7 @@ Input.onClick = (x, y) => {
         if (Storage.isTopScore(mode.type, scoreState.score)) { playerName = ''; state = ST.NAME; }
         else state = ST.MENU;
     } else if (state === ST.LB) {
-        Audio.playClick(); state = ST.MENU;
+        Audio.playClick(); state = ST.MENU; lbFetched = false;
     } else if (state === ST.SET) {
         let clickedItem = false;
         const s = Storage.getSettings();
@@ -876,6 +919,7 @@ document.addEventListener('keydown', (e) => {
     if (state === ST.NAME) {
         if (e.key === 'Enter' && playerName.length > 0) {
             Storage.addScore(mode.type, playerName, scoreState.score);
+            OnlineLB.addScore(mode.type, playerName, scoreState.score);
             if (mode.type === 'daily') Storage.saveDailyResult(Modes.getTodayString(), scoreState.score);
             state = ST.LB;
         } else if (e.key === 'Backspace') playerName = playerName.slice(0,-1);
@@ -988,22 +1032,47 @@ function drawMenu() {
     ctx.textAlign = 'left';
 }
 
+let lbFetching = false;
+let lbFetched = false;
+
 function drawLB() {
     const ctx = R.ctx; R.clear();
     ctx.fillStyle = '#ffcc00'; ctx.font = '12px "Press Start 2P"'; ctx.textAlign = 'center';
     ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 10;
     ctx.fillText('BANG XEP HANG', R.cw/2, 40); ctx.shadowBlur = 0;
+
+    // Tải điểm online khi mở bảng xếp hạng
+    if (!lbFetched && !lbFetching) {
+        lbFetching = true;
+        OnlineLB.fetch().then(() => { lbFetching = false; lbFetched = true; });
+    }
+
+    const online = OnlineLB.getCache();
     const modeLabels = {classic:'CO DIEN',timeattack:'VUOT T.GIAN',daily:'HANG NGAY'};
     let y = 70;
+
+    if (lbFetching) {
+        ctx.fillStyle = '#aaa'; ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('Dang tai...', R.cw/2, y);
+        y += 30;
+    }
+
     for (const m of ['classic','timeattack','daily']) {
         ctx.fillStyle = '#ff6b6b'; ctx.font = '8px "Press Start 2P"'; ctx.fillText(modeLabels[m], R.cw/2, y); y += 20;
-        const lb = Storage.getLeaderboard(m);
+        // Ưu tiên online, fallback local
+        const lb = (online && online[m] && online[m].length > 0) ? online[m] : Storage.getLeaderboard(m);
         ctx.fillStyle = '#fff'; ctx.font = '7px "Press Start 2P"';
         if (!lb.length) { ctx.fillText('Chua co diem', R.cw/2, y); y += 15; }
         else for (let i = 0; i < Math.min(5, lb.length); i++) { ctx.fillText((i+1)+'. '+lb[i].name+' - '+lb[i].score, R.cw/2, y); y += 15; }
         y += 10;
     }
-    ctx.fillStyle = '#aaa'; ctx.font = '7px "Press Start 2P"'; ctx.fillText('Nhan de quay lai', R.cw/2, y+20); ctx.textAlign = 'left';
+
+    // Hiển thị nguồn dữ liệu
+    ctx.fillStyle = online ? '#44bb44' : '#ff4444';
+    ctx.font = '6px "Press Start 2P"';
+    ctx.fillText(online ? 'TRUC TUYEN' : 'MAY NAY', R.cw/2, y + 5);
+
+    ctx.fillStyle = '#aaa'; ctx.font = '7px "Press Start 2P"'; ctx.fillText('Nhan de quay lai', R.cw/2, y+25); ctx.textAlign = 'left';
 }
 
 function drawSettings() {
