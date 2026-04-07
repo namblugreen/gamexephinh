@@ -867,9 +867,20 @@ Input.onClick = (x, y) => {
                 return;
             }
         }
+    } else if (state === ST.NAME) {
+        const ni = Game._nameInputArea, nb = Game._nameOkBtn;
+        if (ni && x >= ni.x && x <= ni.x+ni.w && y >= ni.y && y <= ni.y+ni.h) {
+            // Tap on input box - focus hidden input to open mobile keyboard
+            mobileInput.value = playerName;
+            mobileInput.focus();
+        } else if (nb && x >= nb.x && x <= nb.x+nb.w && y >= nb.y && y <= nb.y+nb.h) {
+            // Tap OK button
+            Audio.playClick();
+            submitName();
+        }
     } else if (state === ST.OVER) {
         Audio.playClick();
-        if (Storage.isTopScore(mode.type, scoreState.score)) { playerName = ''; state = ST.NAME; }
+        if (Storage.isTopScore(mode.type, scoreState.score)) { playerName = ''; mobileInput.value = ''; state = ST.NAME; }
         else state = ST.MENU;
     } else if (state === ST.LB) {
         Audio.playClick(); state = ST.MENU; lbFetched = false;
@@ -920,6 +931,29 @@ Input.onClick = (x, y) => {
     }
 };
 
+// Hidden input for mobile keyboard
+const mobileInput = document.createElement('input');
+mobileInput.type = 'text'; mobileInput.maxLength = 10;
+mobileInput.autocomplete = 'off'; mobileInput.autocapitalize = 'characters';
+mobileInput.style.cssText = 'position:fixed;top:-100px;left:0;opacity:0;font-size:16px;';
+document.body.appendChild(mobileInput);
+
+function submitName() {
+    if (playerName.length > 0) {
+        Storage.addScore(mode.type, playerName, scoreState.score);
+        OnlineLB.addScore(mode.type, playerName, scoreState.score);
+        if (mode.type === 'daily') Storage.saveDailyResult(Modes.getTodayString(), scoreState.score);
+        mobileInput.blur(); mobileInput.value = '';
+        state = ST.LB;
+    }
+}
+
+mobileInput.addEventListener('input', () => {
+    if (state === ST.NAME) {
+        playerName = mobileInput.value.toUpperCase().slice(0, 10);
+    }
+});
+
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         if (state === ST.PLAY) { state = ST.PAUSE; Audio.stopMusic(); }
@@ -927,13 +961,9 @@ document.addEventListener('keydown', (e) => {
     }
     if (e.key === 'z' && state === ST.PLAY) performUndo();
     if (state === ST.NAME) {
-        if (e.key === 'Enter' && playerName.length > 0) {
-            Storage.addScore(mode.type, playerName, scoreState.score);
-            OnlineLB.addScore(mode.type, playerName, scoreState.score);
-            if (mode.type === 'daily') Storage.saveDailyResult(Modes.getTodayString(), scoreState.score);
-            state = ST.LB;
-        } else if (e.key === 'Backspace') playerName = playerName.slice(0,-1);
-        else if (e.key.length === 1 && playerName.length < 10) playerName += e.key.toUpperCase();
+        if (e.key === 'Enter') submitName();
+        else if (e.key === 'Backspace') { playerName = playerName.slice(0,-1); mobileInput.value = playerName; }
+        else if (e.key.length === 1 && playerName.length < 10) { playerName += e.key.toUpperCase(); mobileInput.value = playerName; }
     }
 });
 
@@ -1141,6 +1171,10 @@ function drawSettings() {
     ctx.textAlign = 'left';
 }
 
+// Name input touch areas
+const nameInputArea = { x: 0, y: 0, w: 0, h: 0 };
+const nameOkBtn = { x: 0, y: 0, w: 0, h: 0 };
+
 function drawNameInput() {
     const ctx = R.ctx; R.clear();
     ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 15;
@@ -1149,12 +1183,42 @@ function drawNameInput() {
     ctx.fillStyle = '#fff'; ctx.font = '16px "Press Start 2P"';
     ctx.fillText(''+scoreState.score, R.cw/2, 120);
     ctx.font = '8px "Press Start 2P"'; ctx.fillText('Nhap ten cua ban:', R.cw/2, 170);
+
+    // Draw input box (tappable on mobile)
+    const boxW = 200, boxH = 30, boxX = R.cw/2 - boxW/2, boxY = 185;
+    ctx.strokeStyle = '#44bb44'; ctx.lineWidth = 2;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(boxX+1, boxY+1, boxW-2, boxH-2);
+    nameInputArea.x = boxX; nameInputArea.y = boxY; nameInputArea.w = boxW; nameInputArea.h = boxH;
+
     ctx.font = '12px "Press Start 2P"'; ctx.fillStyle = '#44bb44';
     ctx.shadowColor = '#44bb44'; ctx.shadowBlur = 8;
-    ctx.fillText(playerName + (Math.floor(Date.now()/500)%2===0?'_':' '), R.cw/2, 200);
+    ctx.fillText(playerName + (Math.floor(Date.now()/500)%2===0?'_':' '), R.cw/2, 207);
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#aaa'; ctx.font = '7px "Press Start 2P"'; ctx.fillText('Nhan ENTER de xac nhan', R.cw/2, 240); ctx.textAlign = 'left';
+
+    // Draw OK button
+    const btnW = 100, btnH = 30, btnX = R.cw/2 - btnW/2, btnY = 230;
+    const canSubmit = playerName.length > 0;
+    ctx.fillStyle = canSubmit ? '#44bb44' : '#555555';
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+    if (canSubmit) {
+        ctx.fillStyle = '#66dd66'; ctx.fillRect(btnX, btnY, btnW, 3);
+        ctx.fillStyle = '#228822'; ctx.fillRect(btnX, btnY+btnH-3, btnW, 3);
+    }
+    ctx.fillStyle = canSubmit ? '#fff' : '#888'; ctx.font = '10px "Press Start 2P"';
+    ctx.fillText('OK', R.cw/2, btnY + 20);
+    nameOkBtn.x = btnX; nameOkBtn.y = btnY; nameOkBtn.w = btnW; nameOkBtn.h = btnH;
+
+    ctx.fillStyle = '#666'; ctx.font = '6px "Press Start 2P"';
+    ctx.fillText('Nhan vao o de nhap ten', R.cw/2, btnY + 55);
+    ctx.textAlign = 'left';
 }
+
+// Expose for Input click handling
+Game._nameInputArea = nameInputArea;
+Game._nameOkBtn = nameOkBtn;
+Game._submitName = submitName;
+Game._mobileInput = mobileInput;
 
 // === GAME LOOP ===
 function gameLoop(ts) {
